@@ -1,188 +1,132 @@
 let rods = [];
 let systems = [];
-let lightnings = [];
+let bolts = [];
 
 function setup() {
   createCanvas(800, 600);
   
-  // Create a cityscape of lightning rods
-  let numRods = 15;
-  let spacing = width / numRods;
-  
+  // Create rods arranged in a circle
+  let radius = 200;
+  let numRods = 12;
   for (let i = 0; i < numRods; i++) {
-    // Random heights for buildings
-    let h = random(100, 400);
-    // Add some randomness to x position, but keep them roughly grid-aligned
-    let x = i * spacing + spacing / 2 + random(-10, 10);
-    rods.push(new LightningRod(x, height, h));
+    let angle = map(i, 0, numRods, 0, TWO_PI);
+    let x = width / 2 + cos(angle) * radius;
+    let y = height / 2 + sin(angle) * radius;
+    rods.push(new Rod(x, y, angle));
   }
 }
 
 function draw() {
-  background(20, 20, 25); // Dark background
+  background(20);
 
-  // Draw the rods (buildings)
+  // Draw Rods
   for (let r of rods) {
     r.display();
   }
 
-  // Draw and update lightning bolts
-  for (let i = lightnings.length - 1; i >= 0; i--) {
-    lightnings[i].update();
-    lightnings[i].display();
-    if (lightnings[i].isFinished()) {
-      lightnings.splice(i, 1);
+  // Draw and update Lightning Bolts
+  for (let i = bolts.length - 1; i >= 0; i--) {
+    bolts[i].update();
+    bolts[i].display();
+    if (bolts[i].isDead()) {
+      bolts.splice(i, 1);
     }
   }
 
-  // Draw and update particle systems (sparks)
+  // Draw and update Particle Systems (Sparks)
   for (let i = systems.length - 1; i >= 0; i--) {
     systems[i].run();
-    if (systems[i].particles.length === 0) {
+    if (systems[i].isDead()) {
       systems.splice(i, 1);
     }
   }
 }
 
 function mousePressed() {
-  // Find the rod closest to the mouse x position
-  let closestRod = null;
-  let minDist = Infinity;
+  // Find the closest rod to the mouse to act as the target
+  let closestDist = Infinity;
+  let targetRod = null;
 
   for (let r of rods) {
-    let d = abs(mouseX - r.pos.x);
-    if (d < minDist) {
-      minDist = d;
-      closestRod = r;
+    let d = dist(mouseX, mouseY, r.pos.x, r.pos.y);
+    if (d < closestDist) {
+      closestDist = d;
+      targetRod = r;
     }
   }
 
-  if (closestRod) {
-    // 1. Create Lightning
-    let startX = mouseX + random(-50, 50); // Originating from sky near mouse
-    let startY = 0;
-    lightnings.push(new LightningBolt(startX, startY, closestRod.tip.x, closestRod.tip.y));
-
-    // 2. Create Particle Explosion (Sparks) at the tip
-    systems.push(new ParticleSystem(closestRod.tip));
+  if (targetRod) {
+    // Create Lightning
+    bolts.push(new LightningBolt(createVector(mouseX, mouseY), targetRod.getTip()));
     
-    // Add a flash effect to background (subtle)
-    background(50, 50, 60);
+    // Create Spark Explosion at the rod's tip
+    systems.push(new SparkSystem(targetRod.getTip()));
   }
 }
 
-// --- Classes ---
-
-class LightningRod {
-  constructor(x, y, h) {
+// --- Rod Class ---
+class Rod {
+  constructor(x, y, angle) {
     this.pos = createVector(x, y);
-    this.h = h;
-    this.w = random(30, 60); // Building width
-    this.tip = createVector(x, y - h); // The tip of the rod
+    this.angle = angle; // Angle relative to center
+    this.len = 40;
+    this.baseWidth = 15;
+  }
+
+  // Get the coordinate of the pointy tip
+  getTip() {
+    // The tip points towards the center.
+    // Since pos is at the circle perimeter, we move "inwards" or calculate based on rotation
+    // In display, we rotate by angle + PI to point center.
+    let tipX = this.pos.x + cos(this.angle + PI) * this.len;
+    let tipY = this.pos.y + sin(this.angle + PI) * this.len;
+    return createVector(tipX, tipY);
   }
 
   display() {
-    noStroke();
+    push();
+    translate(this.pos.x, this.pos.y);
+    // Rotate so it points to the center
+    // The default triangle points UP. 
+    // We want it to point towards center. 
+    // The angle calculated in setup is from center OUT to pos.
+    // So we rotate by angle + PI (180 deg) to point IN.
+    rotate(this.angle + PI + HALF_PI); 
     
-    // Building Body
-    fill(40);
-    rectMode(CENTER);
-    rect(this.pos.x, this.pos.y - this.h / 2, this.w, this.h);
+    fill(100);
+    stroke(150);
+    strokeWeight(1);
     
-    // Windows (decoration)
-    fill(20);
-    let rows = this.h / 20;
-    for(let i=0; i<rows-2; i++) {
-        rect(this.pos.x, (this.pos.y - this.h) + 30 + (i*20), this.w * 0.4, 10);
-    }
-
-    // The Rod (Pointy top)
-    fill(100); // Grey metallic
+    // Draw a spike/pyramid shape
     beginShape();
-    vertex(this.pos.x - 5, this.pos.y - this.h);
-    vertex(this.pos.x + 5, this.pos.y - this.h);
-    vertex(this.pos.x, this.pos.y - this.h - 40); // Sharp tip
+    vertex(-this.baseWidth / 2, 0);
+    vertex(this.baseWidth / 2, 0);
+    vertex(0, -this.len); // Tip
     endShape(CLOSE);
     
-    // Actual tip update for collision/targeting
-    this.tip = createVector(this.pos.x, this.pos.y - this.h - 40);
+    // Draw a small connector base
+    fill(80);
+    rectMode(CENTER);
+    rect(0, 5, this.baseWidth, 10);
+    
+    pop();
   }
 }
 
-class LightningBolt {
-  constructor(x1, y1, x2, y2) {
-    this.segments = [];
-    this.life = 10; // Frames the lightning is visible
-    this.generate(x1, y1, x2, y2);
-  }
-
-  generate(x1, y1, x2, y2) {
-    this.segments = [];
-    let currentX = x1;
-    let currentY = y1;
-    let steps = 20;
-    let dx = (x2 - x1) / steps;
-    let dy = (y2 - y1) / steps;
-
-    this.segments.push(createVector(currentX, currentY));
-
-    for (let i = 0; i < steps - 1; i++) {
-      currentX += dx;
-      currentY += dy;
-      
-      // Add jaggedness
-      let offset = random(-30, 30);
-      this.segments.push(createVector(currentX + offset, currentY));
-    }
-    
-    this.segments.push(createVector(x2, y2));
-  }
-
-  update() {
-    this.life--;
-  }
-
-  isFinished() {
-    return this.life < 0;
-  }
-
-  display() {
-    let alpha = map(this.life, 0, 10, 0, 255);
-    
-    noFill();
-    // Glow effect
-    strokeWeight(6);
-    stroke(100, 100, 255, alpha * 0.3);
-    beginShape();
-    for (let v of this.segments) vertex(v.x, v.y);
-    endShape();
-
-    // Main bolt
-    strokeWeight(2);
-    stroke(220, 240, 255, alpha);
-    beginShape();
-    for (let v of this.segments) vertex(v.x, v.y);
-    endShape();
-  }
-}
-
-// --- Particle System based on Nature of Code ---
-
-class ParticleSystem {
+// --- Particle System Class (Nature of Code style) ---
+class SparkSystem {
   constructor(position) {
     this.origin = position.copy();
     this.particles = [];
-    // Create an initial burst of particles
-    for (let i = 0; i < 40; i++) {
-      this.addParticle();
+    this.lifespan = 255;
+    // Create a burst of particles
+    for (let i = 0; i < 50; i++) {
+      this.particles.push(new Spark(this.origin));
     }
   }
 
-  addParticle() {
-    this.particles.push(new Particle(this.origin));
-  }
-
   run() {
+    // Systems fade out if needed, but here we check particle emptiness
     for (let i = this.particles.length - 1; i >= 0; i--) {
       let p = this.particles[i];
       p.run();
@@ -191,20 +135,22 @@ class ParticleSystem {
       }
     }
   }
+
+  isDead() {
+    return this.particles.length === 0;
+  }
 }
 
-class Particle {
-  constructor(position) {
-    this.pos = position.copy();
-    // Intense, random velocity for spark effect
-    this.vel = p5.Vector.random2D();
-    this.vel.mult(random(2, 12)); 
-    // Upward bias slightly (bouncing off the tip)
-    this.vel.y -= random(2, 5); 
-    
-    this.acc = createVector(0, 0.4); // Gravity
+// --- Particle Class ---
+class Spark {
+  constructor(l) {
+    this.position = l.copy();
+    // Explosive velocity
+    this.velocity = p5.Vector.random2D();
+    this.velocity.mult(random(2, 10));
+    this.acceleration = createVector(0, 0.2); // Gravity
     this.lifespan = 255;
-    this.decay = random(5, 15); // How fast it fades
+    this.decay = random(10, 20); // Fast decay for "short and intense"
   }
 
   run() {
@@ -213,27 +159,104 @@ class Particle {
   }
 
   update() {
-    this.vel.add(this.acc);
-    this.pos.add(this.vel);
-    this.vel.mult(0.9); // Air resistance/drag to make sparks stop quickly
+    this.velocity.add(this.acceleration);
+    this.position.add(this.velocity);
     this.lifespan -= this.decay;
   }
 
   display() {
     noStroke();
-    // Spark color: White -> Yellow -> Orange -> Transparent
+    // Intense mix of yellow/white/blue
     let r = 255;
-    let g = map(this.lifespan, 0, 255, 100, 255);
-    let b = map(this.lifespan, 0, 255, 0, 200);
+    let g = 255;
+    let b = random(100, 255);
     
+    push();
+    // Additive blending makes it look like light
+    blendMode(ADD); 
     fill(r, g, b, this.lifespan);
-    
-    // Scale size based on velocity (motion blur stretch)
-    let size = map(this.lifespan, 0, 255, 2, 6);
-    ellipse(this.pos.x, this.pos.y, size, size);
+    ellipse(this.position.x, this.position.y, 4, 4);
+    pop();
   }
 
   isDead() {
     return this.lifespan < 0;
+  }
+}
+
+// --- Lightning Bolt Class ---
+class LightningBolt {
+  constructor(start, end) {
+    this.start = start;
+    this.end = end;
+    this.segments = [];
+    this.life = 10; // Frames visible
+    this.generate();
+  }
+
+  generate() {
+    let current = this.start.copy();
+    let target = this.end.copy();
+    let distTotal = p5.Vector.dist(current, target);
+    let stepSize = 10;
+    
+    this.segments.push(current.copy());
+    
+    // Create a jagged path
+    let direction = p5.Vector.sub(target, current);
+    let steps = distTotal / stepSize;
+    direction.div(steps); // step vector
+
+    for (let i = 0; i < steps; i++) {
+      current.add(direction);
+      
+      // Add randomness perpendicular to direction would be ideal, 
+      // but simple random jitter works well for chaos
+      let jitter = p5.Vector.random2D();
+      jitter.mult(random(-15, 15)); 
+      
+      // Less jitter closer to the target (the rod)
+      let progress = i / steps;
+      jitter.mult(1 - progress); 
+
+      let nextPoint = p5.Vector.add(current, jitter);
+      this.segments.push(nextPoint);
+    }
+    // Snap last point to exact target
+    this.segments.push(target);
+  }
+
+  update() {
+    this.life--;
+  }
+
+  display() {
+    if (this.life <= 0) return;
+
+    push();
+    stroke(200, 220, 255, map(this.life, 0, 10, 0, 255));
+    strokeWeight(2);
+    noFill();
+    blendMode(ADD);
+    
+    beginShape();
+    for (let v of this.segments) {
+      vertex(v.x, v.y);
+    }
+    endShape();
+
+    // Inner bright core
+    stroke(255, 255, 255, map(this.life, 0, 10, 0, 255));
+    strokeWeight(1);
+    beginShape();
+    for (let v of this.segments) {
+      vertex(v.x, v.y);
+    }
+    endShape();
+    pop();
+  }
+
+  isDead() {
+    return this.life <= 0;
   }
 }
