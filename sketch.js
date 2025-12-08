@@ -1,239 +1,183 @@
-let rods = [];
-let systems = [];
-let lightnings = [];
-
 function setup() {
   createCanvas(800, 600);
   
-  // Create a cityscape of lightning rods
-  let numRods = 15;
-  let spacing = width / numRods;
-  
-  for (let i = 0; i < numRods; i++) {
-    // Random heights for buildings
-    let h = random(100, 400);
-    // Add some randomness to x position, but keep them roughly grid-aligned
-    let x = i * spacing + spacing / 2 + random(-10, 10);
-    rods.push(new LightningRod(x, height, h));
-  }
+  // Define the system properties
+  system = new ParticleSystem();
 }
 
 function draw() {
-  background(20, 20, 25); // Dark background
-
-  // Draw the rods (buildings)
-  for (let r of rods) {
-    r.display();
-  }
-
-  // Draw and update lightning bolts
-  for (let i = lightnings.length - 1; i >= 0; i--) {
-    lightnings[i].update();
-    lightnings[i].display();
-    if (lightnings[i].isFinished()) {
-      lightnings.splice(i, 1);
-    }
-  }
-
-  // Draw and update particle systems (sparks)
-  for (let i = systems.length - 1; i >= 0; i--) {
-    systems[i].run();
-    if (systems[i].particles.length === 0) {
-      systems.splice(i, 1);
-    }
-  }
+  background(20, 20, 30);
+  
+  // Update and display the system
+  system.run();
 }
-
-function mousePressed() {
-  // Find the rod closest to the mouse x position
-  let closestRod = null;
-  let minDist = Infinity;
-
-  for (let r of rods) {
-    let d = abs(mouseX - r.pos.x);
-    if (d < minDist) {
-      minDist = d;
-      closestRod = r;
-    }
-  }
-
-  if (closestRod) {
-    // 1. Create Lightning
-    let startX = mouseX + random(-50, 50); // Originating from sky near mouse
-    let startY = 0;
-    lightnings.push(new LightningBolt(startX, startY, closestRod.tip.x, closestRod.tip.y));
-
-    // 2. Create Particle Explosion (Sparks) at the tip
-    systems.push(new ParticleSystem(closestRod.tip));
-    
-    // Add a flash effect to background (subtle)
-    background(50, 50, 60);
-  }
-}
-
-// --- Classes ---
-
-class LightningRod {
-  constructor(x, y, h) {
-    this.pos = createVector(x, y);
-    this.h = h;
-    this.w = random(30, 60); // Building width
-    this.tip = createVector(x, y - h); // The tip of the rod
-  }
-
-  display() {
-    noStroke();
-    
-    // Building Body
-    fill(40);
-    rectMode(CENTER);
-    rect(this.pos.x, this.pos.y - this.h / 2, this.w, this.h);
-    
-    // Windows (decoration)
-    fill(20);
-    let rows = this.h / 20;
-    for(let i=0; i<rows-2; i++) {
-        rect(this.pos.x, (this.pos.y - this.h) + 30 + (i*20), this.w * 0.4, 10);
-    }
-
-    // The Rod (Pointy top)
-    fill(100); // Grey metallic
-    beginShape();
-    vertex(this.pos.x - 5, this.pos.y - this.h);
-    vertex(this.pos.x + 5, this.pos.y - this.h);
-    vertex(this.pos.x, this.pos.y - this.h - 40); // Sharp tip
-    endShape(CLOSE);
-    
-    // Actual tip update for collision/targeting
-    this.tip = createVector(this.pos.x, this.pos.y - this.h - 40);
-  }
-}
-
-class LightningBolt {
-  constructor(x1, y1, x2, y2) {
-    this.segments = [];
-    this.life = 10; // Frames the lightning is visible
-    this.generate(x1, y1, x2, y2);
-  }
-
-  generate(x1, y1, x2, y2) {
-    this.segments = [];
-    let currentX = x1;
-    let currentY = y1;
-    let steps = 20;
-    let dx = (x2 - x1) / steps;
-    let dy = (y2 - y1) / steps;
-
-    this.segments.push(createVector(currentX, currentY));
-
-    for (let i = 0; i < steps - 1; i++) {
-      currentX += dx;
-      currentY += dy;
-      
-      // Add jaggedness
-      let offset = random(-30, 30);
-      this.segments.push(createVector(currentX + offset, currentY));
-    }
-    
-    this.segments.push(createVector(x2, y2));
-  }
-
-  update() {
-    this.life--;
-  }
-
-  isFinished() {
-    return this.life < 0;
-  }
-
-  display() {
-    let alpha = map(this.life, 0, 10, 0, 255);
-    
-    noFill();
-    // Glow effect
-    strokeWeight(6);
-    stroke(100, 100, 255, alpha * 0.3);
-    beginShape();
-    for (let v of this.segments) vertex(v.x, v.y);
-    endShape();
-
-    // Main bolt
-    strokeWeight(2);
-    stroke(220, 240, 255, alpha);
-    beginShape();
-    for (let v of this.segments) vertex(v.x, v.y);
-    endShape();
-  }
-}
-
-// --- Particle System based on Nature of Code ---
 
 class ParticleSystem {
-  constructor(position) {
-    this.origin = position.copy();
+  constructor() {
     this.particles = [];
-    // Create an initial burst of particles
-    for (let i = 0; i < 40; i++) {
-      this.addParticle();
-    }
+    
+    // Configuration
+    this.targetPos = createVector(width * 0.75, height / 2);
+    this.targetRadius = 80;
+    
+    this.sourcePos = createVector(width * 0.25, height / 2);
+    this.sourceRadius = 40;
+    
+    this.initParticles();
+    
+    // To manage the sequence of release
+    this.releaseIndex = 0;
+    this.releaseSpeed = 3; // How many particles release per frame
+    this.isResetting = false;
+    this.resetTimer = 0;
   }
 
-  addParticle() {
-    this.particles.push(new Particle(this.origin));
+  initParticles() {
+    this.particles = [];
+    let spacing = 3; // Density of particles
+    
+    // Create particles in a grid, keep those inside the source radius
+    for (let x = this.sourcePos.x - this.sourceRadius; x <= this.sourcePos.x + this.sourceRadius; x += spacing) {
+      for (let y = this.sourcePos.y - this.sourceRadius; y <= this.sourcePos.y + this.sourceRadius; y += spacing) {
+        if (dist(x, y, this.sourcePos.x, this.sourcePos.y) <= this.sourceRadius) {
+          this.particles.push(new Particle(x, y));
+        }
+      }
+    }
+    
+    // SORTING ALGORITHM: 
+    // This creates the effect of "breaking from the side closest to the big circle".
+    // We sort the array based on the distance to the target.
+    this.particles.sort((a, b) => {
+      let d1 = p5.Vector.dist(a.pos, this.targetPos);
+      let d2 = p5.Vector.dist(b.pos, this.targetPos);
+      return d1 - d2; // Ascending order: closest particles are at the beginning of the array
+    });
   }
 
   run() {
+    // 1. Draw Target Circle (The Absorber)
+    noStroke();
+    
+    // Glow effect
+    for(let i = 0; i < 5; i++) {
+        fill(255, 100, 150, 10 - i*2);
+        ellipse(this.targetPos.x, this.targetPos.y, this.targetRadius * 2 + i*20);
+    }
+    
+    fill(200, 50, 100);
+    ellipse(this.targetPos.x, this.targetPos.y, this.targetRadius * 2);
+    
+    // 2. Manage Release Logic
+    if (this.releaseIndex < this.particles.length) {
+      let limit = min(this.releaseIndex + this.releaseSpeed, this.particles.length);
+      for (let i = this.releaseIndex; i < limit; i++) {
+        this.particles[i].release();
+      }
+      this.releaseIndex = limit;
+    }
+
+    // 3. Update and Draw Particles
+    // We iterate backwards to allow removal
+    let activeCount = 0;
+    
     for (let i = this.particles.length - 1; i >= 0; i--) {
       let p = this.particles[i];
-      p.run();
-      if (p.isDead()) {
-        this.particles.splice(i, 1);
+      
+      if (p.isReleased) {
+        // Nature of Code: Attraction Force
+        let force = this.calculateAttraction(p);
+        p.applyForce(force);
+        p.update();
+        
+        // Check for absorption
+        let d = p5.Vector.dist(p.pos, this.targetPos);
+        if (d < this.targetRadius * 0.8) {
+             this.particles.splice(i, 1); // Remove particle (Absorbed)
+             // Optional: Make target pulse slightly on impact
+             continue; 
+        }
+      } else {
+        // Jitter effect for particles about to be released
+        p.jitter();
+        activeCount++;
       }
+      
+      p.show();
     }
+    
+    // 4. Auto Reset logic
+    if (this.particles.length === 0) {
+        this.resetTimer++;
+        if(this.resetTimer > 60) {
+            this.initParticles();
+            this.releaseIndex = 0;
+            this.resetTimer = 0;
+        }
+    }
+  }
+  
+  calculateAttraction(p) {
+    // F = G * (m1 * m2) / r^2
+    // Simplified direction and magnitude
+    let force = p5.Vector.sub(this.targetPos, p.pos);
+    let distance = force.mag();
+    distance = constrain(distance, 5, 500); // Constrain distance to avoid extreme forces
+    
+    force.normalize();
+    let strength = 200 / (distance * distance); // Strength constant
+    
+    // Increase strength as it gets very close to ensure it sucks in
+    if(distance < 100) strength *= 4; 
+    
+    force.mult(strength * 15);
+    return force;
   }
 }
 
 class Particle {
-  constructor(position) {
-    this.pos = position.copy();
-    // Intense, random velocity for spark effect
-    this.vel = p5.Vector.random2D();
-    this.vel.mult(random(2, 12)); 
-    // Upward bias slightly (bouncing off the tip)
-    this.vel.y -= random(2, 5); 
-    
-    this.acc = createVector(0, 0.4); // Gravity
-    this.lifespan = 255;
-    this.decay = random(5, 15); // How fast it fades
+  constructor(x, y) {
+    this.pos = createVector(x, y);
+    this.origPos = createVector(x, y);
+    this.vel = createVector(0, 0);
+    this.acc = createVector(0, 0);
+    this.isReleased = false;
+    this.color = color(100, 200, 255);
+    this.maxSpeed = 8;
+  }
+  
+  release() {
+    this.isReleased = true;
+    // Give a tiny initial push towards target or random to simulate explosion/crumbling
+    this.vel = p5.Vector.random2D().mult(0.5);
+  }
+  
+  jitter() {
+      // Create a vibrating effect before releasing
+      this.pos.x = this.origPos.x + random(-0.5, 0.5);
+      this.pos.y = this.origPos.y + random(-0.5, 0.5);
   }
 
-  run() {
-    this.update();
-    this.display();
+  applyForce(force) {
+    this.acc.add(force);
   }
 
   update() {
     this.vel.add(this.acc);
+    this.vel.limit(this.maxSpeed);
     this.pos.add(this.vel);
-    this.vel.mult(0.9); // Air resistance/drag to make sparks stop quickly
-    this.lifespan -= this.decay;
+    this.acc.mult(0); // Reset acceleration
   }
 
-  display() {
+  show() {
     noStroke();
-    // Spark color: White -> Yellow -> Orange -> Transparent
-    let r = 255;
-    let g = map(this.lifespan, 0, 255, 100, 255);
-    let b = map(this.lifespan, 0, 255, 0, 200);
-    
-    fill(r, g, b, this.lifespan);
-    
-    // Scale size based on velocity (motion blur stretch)
-    let size = map(this.lifespan, 0, 255, 2, 6);
-    ellipse(this.pos.x, this.pos.y, size, size);
-  }
-
-  isDead() {
-    return this.lifespan < 0;
+    if (this.isReleased) {
+        // As it gets closer to being absorbed, maybe change color
+        fill(255, 200, 255, 200);
+        ellipse(this.pos.x, this.pos.y, 3, 3); // Slightly larger when moving
+    } else {
+        fill(this.color);
+        ellipse(this.pos.x, this.pos.y, 2, 2);
+    }
   }
 }
